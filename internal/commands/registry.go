@@ -30,7 +30,7 @@ type Command interface {
 	Execute(s *discordgo.Session, m *discordgo.MessageCreate, args []string) error
 }
 
-// Registry is a registry of commands
+// Registry is a registry of commands that can be executed by the bot
 type Registry struct {
 	commands map[string]Command
 	logger   *log.Logger
