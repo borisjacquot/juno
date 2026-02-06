@@ -1,0 +1,15 @@
+# Binaries
+juno
+
+# Test folder
+test/
+
+# Env
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
