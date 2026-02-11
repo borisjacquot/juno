@@ -23,27 +23,24 @@ func (c *PingCommand) Description() string {
 	return "Responds with pong"
 }
 
-func (c *PingCommand) Usage() string {
-	return "!ping"
-}
-
-func (c *PingCommand) Examples() []string {
-	return []string{"!ping"}
-}
-
 func (c *PingCommand) Category() string {
 	return "General"
 }
 
-func (c *PingCommand) Execute(s *discordgo.Session, m *discordgo.MessageCreate, args []string) error {
-	c.logger.WithField("user", m.Author.Username).Debug("Received ping command")
+func (c *PingCommand) ExecuteSlash(s *discordgo.Session, i *discordgo.InteractionCreate) error {
+	c.logger.WithField("user", i.Member.User.Username).Debug("Slash command ping executed")
 
-	// react with a ping emoji
-	err := s.MessageReactionAdd(m.ChannelID, m.ID, "🏓")
-	if err != nil {
-		c.logger.WithError(err).Error("Failed to add reaction to ping command")
+	return s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: "🏓 Pong!",
+		},
+	})
+}
+
+func (c *PingCommand) ToApplicationCommand() *discordgo.ApplicationCommand {
+	return &discordgo.ApplicationCommand{
+		Name:        c.Name(),
+		Description: c.Description(),
 	}
-
-	_, err = s.ChannelMessageSend(m.ChannelID, "🏓 Pong!")
-	return err
 }

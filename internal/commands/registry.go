@@ -17,17 +17,14 @@ type Command interface {
 	// Description returns a short description of the command (e.g. "Responds with pong")
 	Description() string
 
-	// Usage returns a string describing how to use the command (e.g. "!ping <args>")
-	Usage() string
-
-	// Examples returns a list of example usages of the command (e.g. ["!ping", "!ping arg1 arg2"])
-	Examples() []string
-
 	// Category returns the category of the command (e.g. "General", "Overwatch", etc.)
 	Category() string
 
-	// Execute executes the command with the given arguments and context
-	Execute(s *discordgo.Session, m *discordgo.MessageCreate, args []string) error
+	// ExecuteSlash executes the command as a slash command with the given arguments and context
+	ExecuteSlash(s *discordgo.Session, i *discordgo.InteractionCreate) error
+
+	// ToApplicationCommand converts the command to a Discord application command (for slash commands)
+	ToApplicationCommand() *discordgo.ApplicationCommand
 }
 
 // Registry is a registry of commands that can be executed by the bot
@@ -53,7 +50,10 @@ func (r *Registry) Register(cmd Command) error {
 	}
 
 	r.commands[name] = cmd
-	r.logger.WithField("command", name).Debug("Registered command")
+	r.logger.WithFields(log.Fields{
+		"name":     cmd.Name(),
+		"category": cmd.Category(),
+	}).Debug("Registered command")
 
 	return nil
 }
@@ -86,27 +86,6 @@ func (r *Registry) All() []Command {
 		return commands[i].Category() < commands[j].Category()
 	})
 	return commands
-}
-
-// Execute executes a command
-func (r *Registry) Execute(s *discordgo.Session, m *discordgo.MessageCreate, cmdName string, args []string) {
-	cmd, ok := r.Get(cmdName)
-	if !ok {
-		r.logger.WithField("command", cmdName).Debug("Command not found")
-		s.ChannelMessageSend(m.ChannelID, "❌ Unknown command. Use `!help` to see the list of available commands.")
-		return
-	}
-
-	r.logger.WithFields(log.Fields{
-		"user":    m.Author.Username,
-		"command": cmdName,
-		"args":    args,
-	}).Info("Executing command")
-
-	if err := cmd.Execute(s, m, args); err != nil {
-		r.logger.WithError(err).WithField("command", cmdName).Error("Error executing command")
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("❌ Error executing command: %v", err))
-	}
 }
 
 // GetByCategory returns a map of commands grouped by category

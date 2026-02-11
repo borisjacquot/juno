@@ -6,6 +6,7 @@ import (
 	"syscall"
 
 	"github.com/borisjacquot/juno/internal/bot"
+	"github.com/borisjacquot/juno/internal/database"
 	"github.com/joho/godotenv"
 	log "github.com/sirupsen/logrus"
 )
@@ -32,13 +33,26 @@ func main() {
 		logger.WithField("url", overfastURL).Info("OVERFAST_API_URL is not set, using default")
 	}
 
+	dbPath := os.Getenv("DATABASE_PATH")
+	if dbPath == "" {
+		dbPath = "data/overwatch-bot.db"
+		logger.WithField("path", dbPath).Info("DATABASE_PATH is not set, using default database path")
+	}
+
+	db, err := database.New(dbPath, logger)
+	if err != nil {
+		logger.WithError(err).Fatal("Failed to initialize database")
+	}
+	defer db.Close()
+
 	logger.WithFields(log.Fields{
-		"token":        token[:2] + "******",
-		"overfast_url": overfastURL,
+		"token":         token[:5] + "******",
+		"overfast_url":  overfastURL,
+		"database_path": dbPath,
 	}).Info("Environment variables loaded")
 
 	// init bot
-	b, err := bot.NewBot(token, overfastURL, logger)
+	b, err := bot.NewBot(token, overfastURL, db, logger)
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to create bot instance")
 	}

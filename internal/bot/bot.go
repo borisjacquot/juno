@@ -1,9 +1,8 @@
 package bot
 
 import (
-	"strings"
-
 	"github.com/borisjacquot/juno/internal/commands"
+	"github.com/borisjacquot/juno/internal/database"
 	"github.com/borisjacquot/juno/internal/overwatch"
 	"github.com/bwmarrin/discordgo"
 	log "github.com/sirupsen/logrus"
@@ -12,12 +11,13 @@ import (
 type Bot struct {
 	session    *discordgo.Session
 	owClient   *overwatch.Client
+	db         *database.Database
 	cmdHandler *commands.Handler
 	logger     *log.Logger
 }
 
 // NewBot creates a new Bot instance
-func NewBot(token, overfastURL string, logger *log.Logger) (*Bot, error) {
+func NewBot(token, overfastURL string, db *database.Database, logger *log.Logger) (*Bot, error) {
 	logger.Debug("Creating Discord session...")
 
 	session, err := discordgo.New("Bot " + token)
@@ -28,21 +28,22 @@ func NewBot(token, overfastURL string, logger *log.Logger) (*Bot, error) {
 	logger.WithField("url", overfastURL).Debug("Creating Overwatch client...")
 	owClient := overwatch.NewClient(overfastURL, logger)
 
-	cmdHandler := commands.NewHandler(owClient, logger)
+	cmdHandler := commands.NewHandler(owClient, db, logger)
 
 	bot := &Bot{
 		session:    session,
 		owClient:   owClient,
+		db:         db,
 		cmdHandler: cmdHandler,
 		logger:     logger,
 	}
 
 	// record handlers
-	session.AddHandler(bot.messageCreate)
+	session.AddHandler(bot.interactionCreate)
 	session.AddHandler(bot.ready)
 
 	// set intents
-	session.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsMessageContent
+	session.Identify.Intents = discordgo.IntentsGuilds
 
 	logger.Debug("Bot instance created successfully")
 	return bot, nil
@@ -56,6 +57,21 @@ func (b *Bot) Start() error {
 
 // Stop closes the Discord session and stops the bot
 func (b *Bot) Stop() error {
+	b.logger.Info("Deleting slash commands...")
+	registeredCommands, err := b.session.ApplicationCommands(b.session.State.User.ID, "")
+	if err != nil {
+		b.logger.WithError(err).Error("Failed to fetch registered commands")
+	} else {
+		for _, cmd := range registeredCommands {
+			err := b.session.ApplicationCommandDelete(b.session.State.User.ID, "", cmd.ID)
+			if err != nil {
+				b.logger.WithError(err).WithField("command", cmd.Name).Error("Failed to delete command")
+			} else {
+				b.logger.WithField("command", cmd.Name).Debug("Deleted command")
+			}
+		}
+	}
+
 	b.logger.Info("Closing WebSocket connection to Discord...")
 	return b.session.Close()
 }
@@ -68,41 +84,32 @@ func (b *Bot) ready(s *discordgo.Session, event *discordgo.Ready) {
 		"guilds":   len(event.Guilds),
 	}).Info("Bot is ready")
 
+	// register slash commands
+	if err := b.cmdHandler.RegisterSlashCommands(s); err != nil {
+		b.logger.WithError(err).Error("Failed to register slash commands")
+		return
+	}
+
 	// set the bot's presence
-	err := s.UpdateGameStatus(0, "Overwatch | !help")
+	err := s.UpdateGameStatus(0, "Overwatch | /help")
 	if err != nil {
 		b.logger.WithError(err).Error("Failed to set bot presence")
 	}
 }
 
-// messageCreate is called when a new message is created in a channel the bot has access to
-func (b *Bot) messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
-	// ignore messages from the bot itself
-	if m.Author.ID == s.State.User.ID {
+// interactionCreate is called when a new interaction is created (e.g. a slash command is used)
+func (b *Bot) interactionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionApplicationCommand {
 		return
 	}
-
-	// ignore messages that don't start with the command prefix
-	if len(m.Content) == 0 || m.Content[0] != '!' {
-		return
-	}
-
-	// parse command and arguments
-	parts := strings.Fields(m.Content)
-	if len(parts) == 0 {
-		return
-	}
-
-	command := strings.ToLower(parts[0])
-	args := parts[1:]
 
 	b.logger.WithFields(log.Fields{
-		"user":    m.Author.Username,
-		"command": command,
-		"args":    args,
-		"channel": m.ChannelID,
-		"guild":   m.GuildID,
-	}).Debug("Received command")
+		"user":    i.Member.User.Username,
+		"command": i.ApplicationCommandData().Name,
+		"options": i.ApplicationCommandData().Options,
+		"channel": i.ChannelID,
+		"guild":   i.GuildID,
+	}).Debug("Received interaction")
 
-	b.cmdHandler.Handle(s, m, command, args)
+	b.cmdHandler.HandleSlashCommand(s, i)
 }
